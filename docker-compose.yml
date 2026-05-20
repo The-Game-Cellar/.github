@@ -1,0 +1,191 @@
+services:
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.1
+    container_name: keycloak
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak_db
+      KC_DB_USERNAME: ${KEYCLOAK_DB_USERNAME}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+    ports:
+      - "8080:8080"
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health/ready || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    command: start-dev
+    networks:
+      - game-cellar-network
+
+  keycloak-db:
+    image: postgres:17
+    container_name: keycloak_db
+    environment:
+      POSTGRES_DB: ${KEYCLOAK_DB_NAME}
+      POSTGRES_USER: ${KEYCLOAK_DB_USERNAME}
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+    volumes:
+      - keycloak_db_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${KEYCLOAK_DB_USERNAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - game-cellar-network
+
+  game-db:
+    image: postgres:17
+    container_name: game_db
+    environment:
+      POSTGRES_DB: ${GAME_DB_NAME}
+      POSTGRES_USER: ${GAME_DB_USERNAME}
+      POSTGRES_PASSWORD: ${GAME_DB_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - game_db_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${GAME_DB_USERNAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - game-cellar-network
+
+  library-db:
+    image: postgres:17
+    container_name: library_db
+    environment:
+      POSTGRES_DB: ${LIBRARY_DB_NAME}
+      POSTGRES_USER: ${LIBRARY_DB_USERNAME}
+      POSTGRES_PASSWORD: ${LIBRARY_DB_PASSWORD}
+    ports:
+      - "5433:5432"
+    volumes:
+      - library_db_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${LIBRARY_DB_USERNAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - game-cellar-network
+
+  api-gateway:
+    build:
+      context: ../api-gateway
+    container_name: api_gateway
+    environment:
+      GATEWAY_PORT: 8000
+      KEYCLOAK_AUTH_SERVER_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-game-cellar}
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-game-cellar-client}
+      GATEWAY_ADMIN_CLIENT_ID: ${GATEWAY_ADMIN_CLIENT_ID:-gateway-admin}
+      GATEWAY_ADMIN_CLIENT_SECRET: ${GATEWAY_ADMIN_CLIENT_SECRET}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173}
+      GAME_SERVICE_URL: http://game-service:8081
+      LIBRARY_SERVICE_URL: http://library-service:8082
+      RECOMMENDATION_SERVICE_URL: http://recommendation-service:8083
+    ports:
+      - "8000:8000"
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - game-cellar-network
+
+  game-service:
+    build:
+      context: ../game-service
+    container_name: game_service
+    environment:
+      GAME_SERVICE_PORT: 8081
+      KEYCLOAK_ISSUER_URI: http://keycloak:8080/realms/${KEYCLOAK_REALM:-game-cellar}
+      GAME_DB_URL: jdbc:postgresql://game-db:5432/${GAME_DB_NAME}
+      GAME_DB_USERNAME: ${GAME_DB_USERNAME}
+      GAME_DB_PASSWORD: ${GAME_DB_PASSWORD}
+      DDL_AUTO: ${DDL_AUTO:-validate}
+      TWITCH_CLIENT_ID: ${TWITCH_CLIENT_ID}
+      TWITCH_CLIENT_SECRET: ${TWITCH_CLIENT_SECRET}
+      IGDB_WORKER_ENABLED: ${IGDB_WORKER_ENABLED:-true}
+    ports:
+      - "8081:8081"
+    depends_on:
+      game-db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - game-cellar-network
+
+  library-service:
+    build:
+      context: ../library-service
+    container_name: library_service
+    environment:
+      LIBRARY_SERVICE_PORT: 8082
+      KEYCLOAK_ISSUER_URI: http://keycloak:8080/realms/${KEYCLOAK_REALM:-game-cellar}
+      LIBRARY_DB_URL: jdbc:postgresql://library-db:5432/${LIBRARY_DB_NAME}
+      LIBRARY_DB_USERNAME: ${LIBRARY_DB_USERNAME}
+      LIBRARY_DB_PASSWORD: ${LIBRARY_DB_PASSWORD}
+      DDL_AUTO: ${DDL_AUTO:-validate}
+      GAME_SERVICE_URL: http://game-service:8081
+    ports:
+      - "8082:8082"
+    depends_on:
+      library-db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - game-cellar-network
+
+  recommendation-service:
+    build:
+      context: ../recommendation-service
+    container_name: recommendation_service
+    environment:
+      RECOMMENDATION_SERVICE_PORT: 8083
+      KEYCLOAK_ISSUER_URI: http://keycloak:8080/realms/${KEYCLOAK_REALM:-game-cellar}
+      GAME_SERVICE_URL: http://game-service:8081
+      LIBRARY_SERVICE_URL: http://library-service:8082
+    ports:
+      - "8083:8083"
+    restart: unless-stopped
+    networks:
+      - game-cellar-network
+
+  frontend:
+    build:
+      context: ../frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+        VITE_KEYCLOAK_URL: ${VITE_KEYCLOAK_URL:-http://localhost:8080}
+        VITE_KEYCLOAK_REALM: ${VITE_KEYCLOAK_REALM:-game-cellar}
+        VITE_KEYCLOAK_CLIENT_ID: ${VITE_KEYCLOAK_CLIENT_ID:-game-cellar-client}
+    container_name: frontend
+    ports:
+      - "5173:80"
+    restart: unless-stopped
+    networks:
+      - game-cellar-network
+
+volumes:
+  keycloak_db_data:
+  game_db_data:
+  library_db_data:
+
+networks:
+  game-cellar-network:
