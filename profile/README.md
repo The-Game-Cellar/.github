@@ -25,12 +25,14 @@ Frontend (5173)
       |
 API Gateway (8000)  <->  Keycloak (8080)
       |
+      +--> Redis (6379)  (rate-limit buckets + recommendation cache / pub-sub)
+      |
 +-------------+----------------------+----------------------------+
 Game Service   Library Service    Recommendation Service
    (8081)         (8082)                (8083)
- PostgreSQL    PostgreSQL              Stateless
-  game_db       library_db
- (port 5432)  (port 5433)
+ PostgreSQL    PostgreSQL              PostgreSQL
+  game_db       library_db          recommendation_db
+ (port 5432)  (port 5433)             (port 5434)
 ```
 
 | Service                | Port | Database               |
@@ -40,7 +42,8 @@ Game Service   Library Service    Recommendation Service
 | Keycloak               | 8080 | `keycloak_db` (5432\*) |
 | Game Service           | 8081 | `game_db` (5432)       |
 | Library Service        | 8082 | `library_db` (5433)    |
-| Recommendation Service | 8083 | stateless              |
+| Recommendation Service | 8083 | `recommendation_db` (5434)          |
+| Redis                  | 6379 | in-memory (rate-limit + rec cache) |
 
 \* Keycloak's own Postgres instance is internal to the Docker network and not exposed on the host.
 
@@ -53,6 +56,7 @@ All traffic from the frontend goes through the API Gateway. Services never accep
 - Spring Cloud Gateway MVC (servlet-based) for routing
 - Spring Security with OAuth 2 Resource Server for JWT validation
 - PostgreSQL 17 with Flyway-managed schemas
+- Redis for rate-limit buckets, recommendation caches, and cross-service pub/sub
 - Keycloak 26 for authentication and identity
 - IGDB API for catalog data, with a nightly cache worker
 
@@ -62,7 +66,7 @@ All traffic from the frontend goes through the API Gateway. Services never accep
 - Vite 8 build tool
 - Tailwind CSS v4
 - TanStack Query v5 for server state
-- React Router v6
+- React Router v7
 - DTOs generated end-to-end from each service's OpenAPI spec via `openapi-typescript`
 
 **Testing**
@@ -76,7 +80,7 @@ All traffic from the frontend goes through the API Gateway. Services never accep
 | [`api-gateway`](https://github.com/The-Game-Cellar/api-gateway)                                  | Single entry point for the frontend. Routing, JWT validation, CORS, login / register / refresh / logout endpoints.            |
 | [`game-service`](https://github.com/The-Game-Cellar/game-service)                                | IGDB API client and local catalog cache. Search, browse, and game-detail data. Background worker walks IGDB nightly.          |
 | [`library-service`](https://github.com/The-Game-Cellar/library-service)                          | User game collection, statuses, ratings, platforms, and declared preferences (genre, tag, release-year). Daily DUSTY sweep.   |
-| [`recommendation-service`](https://github.com/The-Game-Cellar/recommendation-service)            | Stateless three-tier content-based recommendations. Blends rating evidence with declared preferences in a multi-dim profile.  |
+| [`recommendation-service`](https://github.com/The-Game-Cellar/recommendation-service)            | Three-tier content-based recommendations, precomputed per user by background workers into its own Postgres store with a Redis cache. Blends rating evidence with declared preferences in a multi-dim profile. |
 | [`frontend`](https://github.com/The-Game-Cellar/frontend)                                        | React app: dashboard, library, recommendations, explore, wildcard, game detail, profile.                                      |
 | [`.github`](https://github.com/The-Game-Cellar/.github)                                          | Organization profile, top-level `docker-compose.yml`, `.env.example`, and shared documentation.                               |
 
@@ -149,7 +153,7 @@ Secrets never live in source. `.env` is gitignored. Frontend `VITE_*` values shi
 - All user identity is extracted from JWT `sub`, never from request bodies.
 - Tokens live in HttpOnly cookies. The frontend never holds raw JWTs in JavaScript.
 - A 401 response triggers a transparent refresh-token flow, with the original request replayed once the new access token lands.
-- Per-IP rate limiting on `/auth/login` and `/recommendations/*` via Bucket4j.
+- Rate limiting via Bucket4j: per-IP on `/auth/login` + `/register`, per-user on `/recommendations/*`, with spoof-resistant client-IP derivation behind trusted proxies.
 - A `gitleaks` sweep across all repository histories is part of the pre-public-launch checklist.
 
 ## Acknowledgements
