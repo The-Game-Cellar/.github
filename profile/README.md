@@ -43,7 +43,7 @@ Game Service   Library Service    Recommendation Service
 | Game Service           | 8081 | `game_db` (5432)       |
 | Library Service        | 8082 | `library_db` (5433)    |
 | Recommendation Service | 8083 | `recommendation_db` (5434)          |
-| Redis                  | 6379 | in-memory (rate-limit + rec cache) |
+| Redis                  | 6379 | AOF-persisted (rate-limit + cache + pub/sub) |
 
 \* Keycloak's own Postgres instance is internal to the Docker network and not exposed on the host.
 
@@ -83,6 +83,7 @@ All traffic from the frontend goes through the API Gateway. Services never accep
 | [`recommendation-service`](https://github.com/The-Game-Cellar/recommendation-service)            | Three-tier content-based recommendations, precomputed per user by background workers into its own Postgres store with a Redis cache. Blends rating evidence with declared preferences in a multi-dim profile. |
 | [`frontend`](https://github.com/The-Game-Cellar/frontend)                                        | React app: dashboard, library, recommendations, explore, wildcard, game detail, profile.                                      |
 | [`.github`](https://github.com/The-Game-Cellar/.github)                                          | Organization profile, top-level `docker-compose.yml`, `.env.example`, and shared documentation.                               |
+| [`infra`](https://github.com/The-Game-Cellar/infra)                                              | Deployment configuration (private). Production compose overlay, nginx and systemd config, Keycloak realm export, deploy scripts. Composes the services into a running system on a host. |
 
 ## Run Locally
 
@@ -154,6 +155,7 @@ Secrets never live in source. `.env` is gitignored. Frontend `VITE_*` values shi
 - Tokens live in HttpOnly cookies. The frontend never holds raw JWTs in JavaScript.
 - A 401 response triggers a transparent refresh-token flow, with the original request replayed once the new access token lands.
 - Rate limiting via Bucket4j: per-IP on `/auth/login` + `/register`, per-user on `/recommendations/*`, with spoof-resistant client-IP derivation behind trusted proxies.
+- Service-to-service calls made without a user JWT (the recommendation-service per-user worker reaching library and game `/internal/**`) are gated by a shared `INTERNAL_SERVICE_TOKEN`, checked by an `InternalAuthFilter` with a constant-time compare that fails closed when the token is unset. The API Gateway does not route `/internal/**`, so those paths stay reachable only from inside the Docker network.
 - A `gitleaks` sweep across all repository histories is part of the pre-public-launch checklist.
 
 ## Acknowledgements
