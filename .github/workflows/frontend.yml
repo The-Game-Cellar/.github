@@ -1,0 +1,80 @@
+name: Frontend CI
+
+# Shared pipeline for the React frontend. Separate from maven-service.yml because the
+# toolchain shares nothing with it, but hosted here so all pipeline logic stays in one
+# repo and the service repo keeps only a thin caller.
+
+on:
+  workflow_call:
+    inputs:
+      api-url:
+        description: "Origin baked into the bundle. Vite inlines VITE_* at build time, so one image per environment."
+        required: false
+        default: "http://localhost:8000"
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 22 matches the node:22-alpine build stage in the Dockerfile.
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Non-blocking until the 3 existing errors and 1 warning are cleared, so the
+      # badge tracks real regressions instead of known debt. Flip to blocking after.
+      - name: Lint
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/the-game-cellar/frontend
+          tags: |
+            type=sha,format=long,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          build-args: |
+            VITE_API_URL=${{ inputs.api-url }}
+          push: ${{ github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
