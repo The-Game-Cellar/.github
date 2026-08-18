@@ -83,6 +83,43 @@ services:
     networks:
       - game-cellar-network
 
+  recommendation-db:
+    image: postgres:17-alpine
+    container_name: recommendation_db
+    environment:
+      POSTGRES_DB: ${REC_DB_NAME}
+      POSTGRES_USER: ${REC_DB_USERNAME}
+      POSTGRES_PASSWORD: ${REC_DB_PASSWORD}
+    ports:
+      - "5434:5432"
+    volumes:
+      - recommendation_db_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${REC_DB_USERNAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - game-cellar-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - game-cellar-network
+
   api-gateway:
     build:
       context: ../api-gateway
@@ -99,10 +136,16 @@ services:
       GAME_SERVICE_URL: http://game-service:8081
       LIBRARY_SERVICE_URL: http://library-service:8082
       RECOMMENDATION_SERVICE_URL: http://recommendation-service:8083
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      RECOMMENDATION_RATELIMIT_DISTRIBUTED: ${RECOMMENDATION_RATELIMIT_DISTRIBUTED:-true}
     ports:
       - "8000:8000"
     depends_on:
       keycloak:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
     networks:
@@ -122,6 +165,7 @@ services:
       TWITCH_CLIENT_ID: ${TWITCH_CLIENT_ID}
       TWITCH_CLIENT_SECRET: ${TWITCH_CLIENT_SECRET}
       IGDB_WORKER_ENABLED: ${IGDB_WORKER_ENABLED:-true}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
     ports:
       - "8081:8081"
     depends_on:
@@ -143,10 +187,16 @@ services:
       LIBRARY_DB_PASSWORD: ${LIBRARY_DB_PASSWORD}
       DDL_AUTO: ${DDL_AUTO:-validate}
       GAME_SERVICE_URL: http://game-service:8081
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
     ports:
       - "8082:8082"
     depends_on:
       library-db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
     networks:
@@ -161,8 +211,21 @@ services:
       KEYCLOAK_ISSUER_URI: http://keycloak:8080/realms/${KEYCLOAK_REALM:-game-cellar}
       GAME_SERVICE_URL: http://game-service:8081
       LIBRARY_SERVICE_URL: http://library-service:8082
+      REC_DB_URL: jdbc:postgresql://recommendation-db:5432/${REC_DB_NAME}
+      REC_DB_USERNAME: ${REC_DB_USERNAME}
+      REC_DB_PASSWORD: ${REC_DB_PASSWORD}
+      DDL_AUTO: ${DDL_AUTO:-validate}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
     ports:
       - "8083:8083"
+    depends_on:
+      recommendation-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - game-cellar-network
@@ -186,6 +249,8 @@ volumes:
   keycloak_db_data:
   game_db_data:
   library_db_data:
+  recommendation_db_data:
+  redis_data:
 
 networks:
   game-cellar-network:
