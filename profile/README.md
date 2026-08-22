@@ -154,7 +154,7 @@ Secrets never live in source. `.env` is gitignored. Frontend `VITE_*` values shi
 - All user identity is extracted from JWT `sub`, never from request bodies.
 - Tokens live in HttpOnly cookies. The frontend never holds raw JWTs in JavaScript.
 - A 401 response triggers a transparent refresh-token flow, with the original request replayed once the new access token lands.
-- Rate limiting via Bucket4j: per-IP on `/auth/login` + `/register`, per-user on `/recommendations/*`, with spoof-resistant client-IP derivation behind trusted proxies.
+- Rate limiting via Bucket4j: per-IP on `/auth/authorize`, per-user on `/recommendations/*`, with spoof-resistant client-IP derivation behind trusted proxies.
 - Service-to-service calls made without a user JWT (the recommendation-service per-user worker reaching library and game `/internal/**`) are gated by a shared `INTERNAL_SERVICE_TOKEN`, checked by an `InternalAuthFilter` with a constant-time compare that fails closed when the token is unset. The API Gateway does not route `/internal/**`, so those paths stay reachable only from inside the Docker network.
 - A `gitleaks` sweep across all repository histories is part of the pre-public-launch checklist.
 
