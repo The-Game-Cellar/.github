@@ -61,6 +61,10 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          # The image tag carries the sha but the container cannot read its own tag, so it
+          # is baked in as the Sentry release.
+          build-args: |
+            SENTRY_RELEASE=${{ github.sha }}
           push: ${{ github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
