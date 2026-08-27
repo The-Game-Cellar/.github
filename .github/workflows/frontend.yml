@@ -12,6 +12,15 @@ on:
         required: false
         default: "http://localhost:8000"
         type: string
+      sentry-dsn:
+        description: "Sentry DSN baked into the bundle like api-url. Empty leaves the SDK off."
+        required: false
+        default: ""
+        type: string
+    secrets:
+      SENTRY_AUTH_TOKEN:
+        description: "Sentry organisation token for source map upload. Used only on main."
+        required: false
 
 jobs:
   build:
@@ -71,8 +80,16 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          # The image tag carries the sha but the container cannot read its own tag, so it
+          # is baked in as the Sentry release.
           build-args: |
             VITE_API_URL=${{ inputs.api-url }}
+            VITE_SENTRY_DSN=${{ inputs.sentry-dsn }}
+            SENTRY_RELEASE=${{ github.sha }}
+          # The upload token is a BuildKit secret rather than a build arg, so it lands in no
+          # layer. Passed only on main: a pull request build must not create a release in
+          # Sentry for a commit that never deploys.
+          secrets: ${{ github.ref == 'refs/heads/main' && format('sentry_auth_token={0}', secrets.SENTRY_AUTH_TOKEN) || '' }}
           push: ${{ github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
