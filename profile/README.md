@@ -73,6 +73,11 @@ All traffic from the frontend goes through the API Gateway. Services never accep
 - JUnit 5 + Mockito on the backend
 - Vitest, Testing Library, and Mock Service Worker on the frontend
 
+**Operations**
+- Sentry (EU region) for error tracking in all four services and the frontend: errors only, no tracing, no PII beyond the account UUID. Backend events carry the request id from the logs and the commit sha of the image; frontend stack traces are readable through source maps uploaded at build time and never shipped in the image.
+- UptimeRobot for uptime probes against the site, the gateway's health endpoint and the auth host.
+- Better Stack for a heartbeat on the nightly database backup, so a backup that never runs is noticed rather than assumed.
+
 ## Repositories
 
 | Repository                                                                                       | Purpose                                                                                                                       |
